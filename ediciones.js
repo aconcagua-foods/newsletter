@@ -6,6 +6,4 @@
 window.REVISTA = {
   nombre: "Newsletter Aconcagua Foods",
   ediciones: [
-    { titulo: "Ejemplo (borrar)", archivo: "ediciones/ejemplo.pdf" },
-  ]
-};
+       { titulo: "Agosto 2026", archivo: "ediciones/agosto-2026.pdf" },
