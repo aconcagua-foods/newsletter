@@ -38,6 +38,11 @@
   #escenario{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
   #libro{filter:drop-shadow(0 18px 30px rgba(0,0,0,.45));transition:transform .45s ease}
   .pagina{background:#fff;overflow:hidden}
+  .pagina.pend{background:#fff linear-gradient(100deg,#f3f3f0 30%,#fafaf8 50%,#f3f3f0 70%) 0 0/200% 100%;animation:brillo 1.2s linear infinite}
+  .pagina.pend img{opacity:0}
+  @keyframes brillo{to{background-position:-200% 0}}
+  #cargaCaja{flex:none;height:3px;background:transparent;opacity:0;transition:opacity .4s}
+  #carga{display:block;height:100%;width:0;background:var(--acento);transition:width .2s}
   .pagina img{display:block;width:100%;height:100%;user-select:none;-webkit-user-drag:none}
   .previa{max-width:100%;max-height:100%;box-shadow:0 18px 30px rgba(0,0,0,.45);opacity:.55}
   .cargando{background:rgba(20,26,23,.88);padding:16px 22px;border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:10px}
@@ -98,6 +103,7 @@
   <button id="abrirPanel" class="primario">Ediciones</button>
 </header>
 
+<div id="cargaCaja"><i id="carga"></i></div>
 <main>
   <button class="flecha" id="ant" aria-label="Página anterior">‹</button>
   <div id="escenario"></div>
@@ -172,16 +178,20 @@
   var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
   // Busca sola las ediciones en la carpeta: archivos con nombre AAAA-MM.pdf (ej. 2026-08.pdf).
-  function descubrir(){
+  function mesesAtras(desde, hasta){
+    var hoy = new Date(), l = [];
+    for (var k = desde; k < hasta; k++) { var d = new Date(hoy.getFullYear(), hoy.getMonth() - k, 1); l.push({a: d.getFullYear(), m: d.getMonth(), k: k}); }
+    return l;
+  }
+  function descubrir(desde, hasta){
     if (CFG.automatico === false || location.protocol === 'file:' || !window.fetch) return Promise.resolve([]);
-    var carpeta = CFG.carpeta || 'ediciones/', hoy = new Date(), meses = [];
-    for (var k = -1; k < 36; k++) { var d = new Date(hoy.getFullYear(), hoy.getMonth() - k, 1); meses.push({a: d.getFullYear(), m: d.getMonth()}); }
+    var carpeta = CFG.carpeta || 'ediciones/';
     function existe(url){ return fetch(url, {method:'HEAD', cache:'no-cache'}).then(function(r){ return r.ok; }).catch(function(){ return false; }); }
-    var busqueda = Promise.all(meses.map(function(x, i){
+    var busqueda = Promise.all(mesesAtras(desde, hasta).map(function(x){
       var base = carpeta + x.a + '-' + ('0' + (x.m + 1)).slice(-2);
       return existe(base + '.pdf').then(function(ok){
         if (ok) return base + '.pdf';
-        if (i > 4) return null;           // tolera la extensión repetida en los meses recientes
+        if (x.k > 3) return null;         // tolera la extensión repetida en los meses recientes
         return existe(base + '.pdf.pdf').then(function(ok2){ return ok2 ? base + '.pdf.pdf' : null; });
       }).then(function(arch){ return arch ? {titulo: MESES[x.m] + ' ' + x.a, archivo: arch} : null; });
     })).then(function(l){ return l.filter(Boolean); });
@@ -222,11 +232,11 @@
       showCover: true, usePortrait: true, mobileScrollSupport: false,
       maxShadowOpacity: 0.35, flippingTime: 700, startPage: actual
     });
-    el.innerHTML = paginas.map(function(u){
-      return '<div class="pagina"><img src="' + u + '" alt="" draggable="false"></div>';
+    el.innerHTML = paginas.map(function(u, i){
+      return '<div class="pagina' + (u ? '' : ' pend') + '"><img data-i="' + i + '" src="' + (u || VACIA) + '" alt="" draggable="false"></div>';
     }).join('');
     libro.loadFromHTML(el.querySelectorAll('.pagina'));
-    libro.on('flip', function(e){ actual = e.data; pie(); encuadre(); if (!$('lupa').hidden) lupaPintar(); });
+    libro.on('flip', function(e){ actual = e.data; pie(); encuadre(); if (!$('lupa').hidden) lupaPintar(); bombear(); });
     leyendo = true;
     libro.on('changeState', function(e){ leyendo = e.data === 'read'; encuadre(); });
     hoja = el; marco = caja;
@@ -253,9 +263,11 @@
   }
   function lupaPintar(){
     var v = visibles(), caja = $('lupaHojas');
-    caja.innerHTML = v.map(function(i){ return '<img src="' + paginas[i] + '" alt="Página ' + (i + 1) + '" draggable="false">'; }).join('');
+    caja.innerHTML = v.map(function(i){ return '<img data-l="' + i + '" src="' + (alta[i] || paginas[i] || VACIA) + '" alt="Página ' + (i + 1) + '" draggable="false">'; }).join('');
     lupaTam();
     $('lupaPag').textContent = v.map(function(i){ return i + 1; }).join('–') + ' / ' + paginas.length;
+    v.forEach(function(i){ if (!alta[i] && pedidasAlta.indexOf(i) < 0) pedidasAlta.push(i); });
+    bombear();
   }
   function lupaTam(){
     var v = visibles(), sc = $('lupaScroll');
@@ -294,57 +306,94 @@
   }
   var estado = { clave: '' };
 
+  // Las páginas se dibujan de a una, partiendo por las que se están mirando.
+  // El libro aparece apenas se conoce el tamaño, sin esperar a que estén todas.
+  var VACIA = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+  var docActual = null, alta = {}, pedidasAlta = [], dibujando = false;
+
+  function dibujar(doc, i, altoPx, calidad){
+    return doc.getPage(i + 1).then(function(pg){
+      var v1 = pg.getViewport({scale:1});
+      var vp = pg.getViewport({scale: Math.min(3.4, altoPx / v1.height)});
+      var c = document.createElement('canvas');
+      c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      var ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      return pg.render({canvasContext: ctx, viewport: vp}).promise.then(function(){
+        return new Promise(function(ok){ c.toBlob(function(b){ ok(b); }, 'image/jpeg', calidad); });
+      }).then(function(b){ c.width = c.height = 0; return URL.createObjectURL(b); });
+    });
+  }
+  function siguientePendiente(){
+    var mejor = -1, dist = 1e9;
+    for (var i = 0; i < paginas.length; i++) {
+      if (paginas[i]) continue;
+      var d = Math.abs(i - actual) - (i >= actual ? 0.5 : 0);   // primero lo que viene
+      if (d < dist) { dist = d; mejor = i; }
+    }
+    return mejor;
+  }
+  function bombear(){
+    if (dibujando || !docActual) return;
+    var doc = docActual, mio = token, i, esAlta = false;
+    while (pedidasAlta.length && alta[pedidasAlta[0]]) pedidasAlta.shift();
+    if (pedidasAlta.length && !$('lupa').hidden) { i = pedidasAlta.shift(); esAlta = true; }
+    else { pedidasAlta = []; i = siguientePendiente(); }
+    if (i < 0) { progreso(); return; }
+    dibujando = true;
+    dibujar(doc, i, esAlta ? 2600 : 1500, esAlta ? 0.92 : 0.86).then(function(url){
+      dibujando = false;
+      if (mio !== token) { URL.revokeObjectURL(url); return; }
+      if (esAlta) {
+        alta[i] = url;
+        Array.prototype.forEach.call(document.querySelectorAll('#lupaHojas img[data-l="' + i + '"]'), function(im){ im.src = url; });
+      } else {
+        paginas[i] = url;
+        Array.prototype.forEach.call(document.querySelectorAll('#libro img[data-i="' + i + '"]'), function(im){
+          im.src = url; if (im.parentNode) im.parentNode.classList.remove('pend');
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('#lupaHojas img[data-l="' + i + '"]'), function(im){ if (!alta[i]) im.src = url; });
+      }
+      progreso(); bombear();
+    }).catch(function(e){ dibujando = false; console.error(e); if (mio === token && !esAlta) { paginas[i] = VACIA; bombear(); } });
+  }
+  function progreso(){
+    var n = paginas.length, listas = paginas.filter(Boolean).length, b = $('carga');
+    b.style.width = (n ? listas / n * 100 : 0) + '%';
+    b.parentNode.style.opacity = (n && listas < n) ? 1 : 0;
+  }
+
   function abrir(origen, titulo, clave, urlDescarga, pagIni){
     var mio = ++token;
-    paginas.forEach(function(u){ URL.revokeObjectURL(u); });
-    paginas = []; actual = 0; estado.clave = clave || ''; lupa(false);
+    paginas.forEach(function(u){ if (u && u !== VACIA) URL.revokeObjectURL(u); });
+    Object.keys(alta).forEach(function(k){ URL.revokeObjectURL(alta[k]); });
+    if (docActual) { try { docActual.destroy(); } catch(e){} }
+    docActual = null; alta = {}; pedidasAlta = [];
+    paginas = []; actual = 0; estado.clave = clave || ''; lupa(false); progreso();
     if (libro) { try { libro.destroy(); } catch(e){} libro = null; }
     $('escenario').replaceChildren();
     $('edicion').textContent = titulo || '';
     var d = $('descargar');
     if (urlDescarga) { d.href = urlDescarga; d.hidden = false; } else { d.hidden = true; }
     marcar(clave); pie();
-    aviso('<strong>' + esc(titulo || 'Cargando') + '</strong><div class="progreso"><i id="barra"></i></div><p>Preparando la revista…</p>');
+    aviso('<strong>' + esc(titulo || 'Cargando') + '</strong><p>Abriendo la revista…</p>');
 
-    var fuente = typeof origen === 'string' ? {url: origen} : {data: origen};
-    return pdfjsLib.getDocument(fuente).promise.then(function(doc){
-      var n = doc.numPages, urls = [];
-      function una(i){
-        if (mio !== token) return Promise.reject('cancelado');
-        if (i > n) return urls;
-        return doc.getPage(i).then(function(pg){
-          var v1 = pg.getViewport({scale:1});
-          if (i === 1) prop = v1.height / v1.width;
-          var escala = Math.min(3.2, 2300 / v1.height);
-          var vp = pg.getViewport({scale: escala});
-          var c = document.createElement('canvas');
-          c.width = Math.round(vp.width); c.height = Math.round(vp.height);
-          var ctx = c.getContext('2d');
-          ctx.fillStyle = '#fff'; ctx.fillRect(0,0,c.width,c.height);
-          return pg.render({canvasContext: ctx, viewport: vp}).promise.then(function(){
-            return new Promise(function(ok){ c.toBlob(function(b){ ok(b); }, 'image/jpeg', 0.92); });
-          }).then(function(b){
-            urls.push(URL.createObjectURL(b));
-            if (i === 1 && n > 1) {
-              var pre = document.createElement('img');
-              pre.src = urls[0]; pre.className = 'previa'; pre.alt = '';
-              $('escenario').replaceChildren(pre);
-              aviso('<div class="cargando"><div class="progreso"><i id="barra"></i></div><p>Preparando la revista…</p></div>');
-            }
-            c.width = c.height = 0;
-            var barra = $('barra'); if (barra) barra.style.width = Math.round(i / n * 100) + '%';
-            return una(i + 1);
-          });
-        });
-      }
-      return una(1);
-    }).then(function(urls){
-      paginas = urls;
-      actual = Math.min(Math.max(0, (pagIni || 1) - 1), urls.length - 1);
-      aviso('');
-      montar();
+    var fuente = typeof origen === 'string' ? {url: origen, rangeChunkSize: 262144} : {data: origen};
+    var tarea = pdfjsLib.getDocument(fuente);
+    return tarea.promise.then(function(doc){
+      if (mio !== token) { doc.destroy(); return; }
+      return doc.getPage(1).then(function(pg){
+        if (mio !== token) { doc.destroy(); return; }
+        var v1 = pg.getViewport({scale:1});
+        prop = v1.height / v1.width;
+        docActual = doc;
+        paginas = []; for (var i = 0; i < doc.numPages; i++) paginas.push(null);
+        actual = Math.min(Math.max(0, (pagIni || 1) - 1), paginas.length - 1);
+        aviso('');
+        montar(); progreso(); bombear();
+      });
     }).catch(function(err){
-      if (err === 'cancelado') return;
+      if (mio !== token) return;
       console.error(err);
       var local = location.protocol === 'file:' && typeof origen === 'string';
       aviso(local
@@ -416,17 +465,30 @@
   window.addEventListener('drop', function(e){ leerArchivo(e.dataTransfer && e.dataTransfer.files[0]); });
   var t; window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(function(){ montar(); if (!$('lupa').hidden) lupaPintar(); }, 200); });
 
-  // Arranque: la edición del enlace, o la más reciente (la primera de la lista).
-  aviso('<p>Buscando ediciones…</p>');
-  descubrir().then(function(auto){
+  // Arranque: primero se buscan los meses recientes para abrir de inmediato;
+  // el resto del archivo se completa en segundo plano.
+  function unir(a, b){
     var vistos = {};
-    EDS = auto.concat(MANUAL).filter(function(e){ if (vistos[e.archivo]) return false; vistos[e.archivo] = 1; return true; });
-    pintarLista();
-    var m = /ed=([^&]+)/.exec(location.hash), p = /p=(\d+)/.exec(location.hash);
-    var pedida = m && EDS.filter(function(e){ return slug(e) === decodeURIComponent(m[1]); })[0];
-    if (pedida) abrirEdicion(pedida, p ? +p[1] : 1);
-    else if (EDS.length) abrirEdicion(EDS[0], 1);
-    else aviso('<strong>Aún no hay ediciones publicadas</strong><p>Puedes revisar un PDF de tu computador para ver cómo queda.</p><button class="primario" onclick="document.getElementById(\'archivo\').click()">Abrir un PDF…</button>');
+    return a.concat(b).filter(function(e){ if (vistos[e.archivo]) return false; vistos[e.archivo] = 1; return true; });
+  }
+  aviso('<p>Buscando ediciones…</p>');
+  var hm = /ed=([^&]+)/.exec(location.hash), hp = /p=(\d+)/.exec(location.hash);
+  var pedidaClave = hm ? decodeURIComponent(hm[1]) : '', abierta = false;
+  function intentarAbrir(final){
+    if (abierta) return;
+    var pedida = pedidaClave && EDS.filter(function(e){ return slug(e) === pedidaClave; })[0];
+    if (pedida) { abierta = true; abrirEdicion(pedida, hp ? +hp[1] : 1); }
+    else if (EDS.length && (!pedidaClave || final)) { abierta = true; abrirEdicion(EDS[0], 1); }
+    else if (final) aviso('<strong>Aún no hay ediciones publicadas</strong><p>Puedes revisar un PDF de tu computador para ver cómo queda.</p><button class="primario" onclick="document.getElementById(\'archivo\').click()">Abrir un PDF…</button>');
+  }
+  var recientes = [];
+  descubrir(-1, 3).then(function(auto){
+    recientes = auto; EDS = unir(auto, MANUAL); pintarLista(); marcar(estado.clave);
+    if (auto.length) intentarAbrir(false);
+    return descubrir(3, 36);
+  }).then(function(resto){
+    EDS = unir(recientes.concat(resto), MANUAL); pintarLista(); marcar(estado.clave);
+    intentarAbrir(true);
   });
 })();
 </script>
