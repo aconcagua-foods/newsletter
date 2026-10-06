@@ -167,7 +167,27 @@
   'use strict';
   var $ = function(id){ return document.getElementById(id); };
   var CFG = window.REVISTA || {};
-  var EDS = (CFG.ediciones || []).filter(function(e){ return e && e.archivo; });
+  var MANUAL = (CFG.ediciones || []).filter(function(e){ return e && e.archivo; });
+  var EDS = [];
+  var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  // Busca sola las ediciones en la carpeta: archivos con nombre AAAA-MM.pdf (ej. 2026-08.pdf).
+  function descubrir(){
+    if (CFG.automatico === false || location.protocol === 'file:' || !window.fetch) return Promise.resolve([]);
+    var carpeta = CFG.carpeta || 'ediciones/', hoy = new Date(), meses = [];
+    for (var k = -1; k < 36; k++) { var d = new Date(hoy.getFullYear(), hoy.getMonth() - k, 1); meses.push({a: d.getFullYear(), m: d.getMonth()}); }
+    function existe(url){ return fetch(url, {method:'HEAD', cache:'no-cache'}).then(function(r){ return r.ok; }).catch(function(){ return false; }); }
+    var busqueda = Promise.all(meses.map(function(x, i){
+      var base = carpeta + x.a + '-' + ('0' + (x.m + 1)).slice(-2);
+      return existe(base + '.pdf').then(function(ok){
+        if (ok) return base + '.pdf';
+        if (i > 4) return null;           // tolera la extensión repetida en los meses recientes
+        return existe(base + '.pdf.pdf').then(function(ok2){ return ok2 ? base + '.pdf.pdf' : null; });
+      }).then(function(arch){ return arch ? {titulo: MESES[x.m] + ' ' + x.a, archivo: arch} : null; });
+    })).then(function(l){ return l.filter(Boolean); });
+    var limite = new Promise(function(ok){ setTimeout(function(){ ok([]); }, 8000); });
+    return Promise.race([busqueda, limite]);
+  }
   var NOMBRE = CFG.nombre || 'Newsletter';
   document.title = NOMBRE; $('nombre').textContent = NOMBRE;
 
@@ -181,7 +201,7 @@
   var leyendo = true, hoja = null, marco = null, libro = null, paginas = [], prop = 1.414, actual = 0, token = 0;
 
   function slug(e){
-    return String(e.archivo).split('/').pop().replace(/\.pdf$/i,'');
+    return String(e.archivo).split('/').pop().replace(/(\.pdf)+$/i,'');
   }
   function aviso(html){ $('aviso').innerHTML = html || ''; $('aviso').style.display = html ? 'flex' : 'none'; }
   function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
@@ -343,13 +363,16 @@
   }
   function panel(v){ $('panel').classList.toggle('abierto', v); $('velo').classList.toggle('abierto', v); }
 
-  EDS.forEach(function(e){
-    var li = document.createElement('li'), b = document.createElement('button');
-    b.textContent = e.titulo || slug(e); b.dataset.clave = slug(e);
-    b.onclick = function(){ panel(false); abrirEdicion(e); };
-    li.appendChild(b); $('lista').appendChild(li);
-  });
-  if (!EDS.length) $('lista').innerHTML = '<li style="padding:12px;color:var(--suave)">Aún no hay ediciones publicadas.</li>';
+  function pintarLista(){
+    $('lista').innerHTML = '';
+    EDS.forEach(function(e){
+      var li = document.createElement('li'), b = document.createElement('button');
+      b.textContent = e.titulo || slug(e); b.dataset.clave = slug(e);
+      b.onclick = function(){ panel(false); abrirEdicion(e); };
+      li.appendChild(b); $('lista').appendChild(li);
+    });
+    if (!EDS.length) $('lista').innerHTML = '<li style="padding:12px;color:var(--suave)">Aún no hay ediciones publicadas.</li>';
+  }
 
   function leerArchivo(f){
     if (!f) return;
@@ -394,11 +417,17 @@
   var t; window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(function(){ montar(); if (!$('lupa').hidden) lupaPintar(); }, 200); });
 
   // Arranque: la edición del enlace, o la más reciente (la primera de la lista).
-  var m = /ed=([^&]+)/.exec(location.hash), p = /p=(\d+)/.exec(location.hash);
-  var pedida = m && EDS.filter(function(e){ return slug(e) === decodeURIComponent(m[1]); })[0];
-  if (pedida) abrirEdicion(pedida, p ? +p[1] : 1);
-  else if (EDS.length) abrirEdicion(EDS[0], 1);
-  else aviso('<strong>Aún no hay ediciones publicadas</strong><p>Puedes revisar un PDF de tu computador para ver cómo queda.</p><button class="primario" onclick="document.getElementById(\'archivo\').click()">Abrir un PDF…</button>');
+  aviso('<p>Buscando ediciones…</p>');
+  descubrir().then(function(auto){
+    var vistos = {};
+    EDS = auto.concat(MANUAL).filter(function(e){ if (vistos[e.archivo]) return false; vistos[e.archivo] = 1; return true; });
+    pintarLista();
+    var m = /ed=([^&]+)/.exec(location.hash), p = /p=(\d+)/.exec(location.hash);
+    var pedida = m && EDS.filter(function(e){ return slug(e) === decodeURIComponent(m[1]); })[0];
+    if (pedida) abrirEdicion(pedida, p ? +p[1] : 1);
+    else if (EDS.length) abrirEdicion(EDS[0], 1);
+    else aviso('<strong>Aún no hay ediciones publicadas</strong><p>Puedes revisar un PDF de tu computador para ver cómo queda.</p><button class="primario" onclick="document.getElementById(\'archivo\').click()">Abrir un PDF…</button>');
+  });
 })();
 </script>
 </body>
