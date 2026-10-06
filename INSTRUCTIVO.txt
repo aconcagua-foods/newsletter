@@ -1,0 +1,71 @@
+NEWSLETTER ACONCAGUA FOODS — REVISTA DIGITAL
+=============================================
+
+Qué es
+------
+Una página que muestra los PDF del newsletter como revista que se hojea.
+Reemplaza a FlipHTML5: no tiene costo ni cuentas, y todo queda en manos
+de la empresa.
+
+Qué hay en la carpeta
+---------------------
+  index.html      La página. No se toca.
+  ediciones.js    La lista de ediciones. Es lo único que se edita.
+  ediciones/      Aquí van los PDF.
+
+
+PUBLICAR UNA EDICIÓN NUEVA (3 pasos)
+------------------------------------
+1. Guarda el PDF con un nombre simple: minúsculas, sin espacios ni tildes.
+      Bien:  noviembre-2026.pdf
+      Mal:   NOVIEMBRE 2026 Newsletter (1).pdf
+
+2. Sube el PDF a la carpeta "ediciones".
+
+3. Abre "ediciones.js" con el Bloc de notas y agrega una línea ARRIBA de
+   las demás, con el título y el mismo nombre del archivo:
+
+      { titulo: "Noviembre 2026", archivo: "ediciones/noviembre-2026.pdf" },
+
+   Guarda y sube el archivo. La primera línea de la lista es la edición
+   que se abre al entrar a la página.
+
+Para revisar antes de publicar: entra a la página, botón "Ediciones" →
+"Abrir un PDF…" y elige el archivo de tu computador. Solo lo ves tú.
+
+Para compartir una edición: copia la dirección del navegador mientras la
+estás viendo. El enlace abre esa edición en esa página.
+
+
+Si algo falla
+-------------
+"No se pudo abrir esta edición": el nombre en ediciones.js no coincide
+con el del PDF (revisa mayúsculas, espacios y la terminación .pdf), o el
+PDF no se subió a la carpeta "ediciones".
+
+La página queda en blanco después de editar ediciones.js: falta una coma
+al final de una línea o una comilla. Compara con las líneas anteriores.
+
+
+PARA TI: DÓNDE ALOJARLA
+-----------------------
+Son archivos estáticos (HTML + JS + PDF). No requiere servidor, base de
+datos ni conexión a servicios externos: las librerías van dentro de
+index.html. Sirve cualquier alojamiento web que entregue archivos tal
+cual, por ejemplo una subcarpeta del sitio de la empresa o un sitio
+estático en Azure.
+
+Importante:
+- Debe abrirse desde una dirección web (https://...). Con doble clic
+  desde una carpeta solo funciona la vista previa de un PDF.
+- SharePoint moderno normalmente descarga los .html en vez de mostrarlos.
+  Si se quiere usar SharePoint hay que confirmarlo con el administrador
+  antes de comprometerse con esa opción.
+- Quien vaya a publicar necesita permiso para subir archivos a la carpeta
+  "ediciones" y reemplazar "ediciones.js".
+- Si el acceso debe ser solo para trabajadores, la restricción la pone el
+  alojamiento (inicio de sesión corporativo o red interna); la página en
+  sí no tiene contraseña.
+
+Librerías incluidas: PDF.js 3.11 (Mozilla, Apache 2.0) y
+StPageFlip 2.0.7 (MIT). Ambas de uso libre.
